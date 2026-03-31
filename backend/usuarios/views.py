@@ -179,6 +179,9 @@ class CrearPermisoView(APIView):
         if Permiso.objects.filter(codigo=codigo).exists():
             return Response({"error": "El permiso ya existe"}, status=status.HTTP_400_BAD_REQUEST)
         permiso = Permiso.objects.create(codigo=codigo, modulo=modulo)
+        usuario = get_usuario_from_token(request)
+        if usuario:
+            Bitacora.objects.create(usuario=usuario, accion='CREAR_PERMISO', tabla='permisos', ip=request.META.get('REMOTE_ADDR'))
         return Response({"mensaje": "Permiso creado correctamente", "id": permiso.id}, status=status.HTTP_201_CREATED)
 
 
@@ -190,6 +193,9 @@ class EditarPermisoView(APIView):
             permiso.codigo = request.data.get('codigo', permiso.codigo)
             permiso.modulo = request.data.get('modulo', permiso.modulo)
             permiso.save()
+            usuario = get_usuario_from_token(request)
+            if usuario:
+                Bitacora.objects.create(usuario=usuario, accion='EDITAR_PERMISO', tabla='permisos', ip=request.META.get('REMOTE_ADDR'))
             return Response({"mensaje": "Permiso actualizado correctamente"}, status=status.HTTP_200_OK)
         except Permiso.DoesNotExist:
             return Response({"error": "Permiso no encontrado"}, status=status.HTTP_404_NOT_FOUND)
@@ -201,10 +207,12 @@ class EliminarPermisoView(APIView):
         try:
             permiso = Permiso.objects.get(id=id)
             permiso.delete()
+            usuario = get_usuario_from_token(request)
+            if usuario:
+                Bitacora.objects.create(usuario=usuario, accion='ELIMINAR_PERMISO', tabla='permisos', ip=request.META.get('REMOTE_ADDR'))
             return Response({"mensaje": "Permiso eliminado correctamente"}, status=status.HTTP_200_OK)
         except Permiso.DoesNotExist:
             return Response({"error": "Permiso no encontrado"}, status=status.HTTP_404_NOT_FOUND)
-
 
 class ListarBitacoraView(APIView):
     permission_classes = [AllowAny]
