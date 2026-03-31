@@ -64,3 +64,10 @@ class Sesion(models.Model):
 
     class Meta:
         db_table = 'sesiones' 
+class UsuarioRol(models.Model):
+    usuario = models.ForeignKey(Usuario, on_delete=models.CASCADE)
+    rol = models.ForeignKey(Rol, on_delete=models.CASCADE)
+
+    class Meta:
+        db_table = 'usuario_roles'
+        
