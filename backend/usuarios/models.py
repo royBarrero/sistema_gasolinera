@@ -26,15 +26,35 @@ class Usuario(models.Model):
         db_table='usuarios'
     def __str__(self):
         return f"{self.nombre} ({self.email})"
-class Bitacora ( models.Model):
-    usuario=models.ForeignKey(Usuario,on_delete=models.CASCADE)
-    accion=models.CharField(max_length=100)
-    tabla=models.CharField(max_length=50,null=True)
-    ip=models.CharField(max_length=45 , null = True )
-    fecha=models.DateTimeField(auto_now_add=True)
+class Bitacora(models.Model):
+    # Definimos los niveles de alerta para el sistema
+    NIVELES_RIESGO = [
+        ('INFO', 'Información Normal'),
+        ('ALERTA', 'Acceso No Autorizado / Intento Fallido'),
+        ('CRITICO', 'Peligro / Acción Destructiva'),
+    ]
 
-    class Meta : 
+    # null=True es VITAL aquí. Si alguien falla el login, no hay usuario, pero registramos el intento.
+    usuario = models.ForeignKey(Usuario, on_delete=models.CASCADE, null=True, blank=True)
+    
+    # Datos exactos de tu Frontend
+    accion = models.CharField(max_length=50) # Ej: CREATE, UPDATE, LOGIN_FALLIDO
+    modulo_afectado = models.CharField(max_length=100) # Ej: Autenticación, Gestión de Personal
+    descripcion = models.TextField() # Ej: "Intento de acceso con contraseña incorrecta"
+    direccion_ip = models.CharField(max_length=45, null=True, blank=True)
+    dispositivo = models.CharField(max_length=100, null=True, blank=True) # Ej: Panel Web, App Móvil
+    
+    # Nuevo campo para las alertas
+    nivel_riesgo = models.CharField(max_length=20, choices=NIVELES_RIESGO, default='INFO')
+    
+    # Fecha y hora automática
+    creado_en = models.DateTimeField(auto_now_add=True)
+
+    class Meta: 
         db_table = 'bitacora'
+        
+    def __str__(self):
+        return f"[{self.nivel_riesgo}] {self.accion} - IP: {self.direccion_ip}"
 
 class Sesion(models.Model):
     usuario = models.ForeignKey(Usuario, on_delete=models.CASCADE)
