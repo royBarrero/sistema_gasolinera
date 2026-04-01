@@ -18,6 +18,21 @@ def get_usuario_from_token(request):
         return Usuario.objects.get(id=user_id)
     except:
         return None
+
+def crear_bitacora(usuario, accion, modulo_afectado, descripcion, request, nivel_riesgo='INFO'):
+    """Helper para crear registros en la bitácora de forma consistente"""
+    try:
+        Bitacora.objects.create(
+            usuario=usuario,
+            accion=accion,
+            modulo_afectado=modulo_afectado,
+            descripcion=descripcion,
+            direccion_ip=request.META.get('REMOTE_ADDR'),
+            dispositivo=request.META.get('HTTP_USER_AGENT', 'Desconocido'),
+            nivel_riesgo=nivel_riesgo
+        )
+    except Exception as e:
+        print(f"Error al crear bitácora: {e}")
 class LoginView(APIView):
     permission_classes = [AllowAny]
     def post(self, request):
@@ -26,19 +41,42 @@ class LoginView(APIView):
         try:
             user = Usuario.objects.get(email=email)
             if not user.activo:
+                crear_bitacora(
+                    usuario=user,
+                    accion='LOGIN_FALLIDO',
+                    modulo_afectado='Autenticación',
+                    descripcion='Intento de login con usuario inactivo',
+                    request=request,
+                    nivel_riesgo='ALERTA'
+                )
                 return Response({"error": "Usuario inactivo"}, status=status.HTTP_403_FORBIDDEN)
             if check_password(password, user.password_hash):
                 refresh = RefreshToken()
                 refresh['user_id'] = user.id
                 refresh['nombre'] = user.nombre
                 refresh['email'] = user.email
-                Bitacora.objects.create(usuario=user, accion='LOGIN', tabla='usuarios', ip=request.META.get('REMOTE_ADDR'))
+                crear_bitacora(
+                    usuario=user,
+                    accion='LOGIN_EXITOSO',
+                    modulo_afectado='Autenticación',
+                    descripcion=f'Login exitoso: {user.email}',
+                    request=request,
+                    nivel_riesgo='INFO'
+                )
                 return Response({
                     "access": str(refresh.access_token),
                     "refresh": str(refresh),
                     "usuario": {"id": user.id, "nombre": user.nombre, "email": user.email}
                 }, status=status.HTTP_200_OK)
             else:
+                crear_bitacora(
+                    usuario=user,
+                    accion='LOGIN_FALLIDO',
+                    modulo_afectado='Autenticación',
+                    descripcion='Intento de login con contraseña incorrecta',
+                    request=request,
+                    nivel_riesgo='ALERTA'
+                )
                 return Response({"error": "Contraseña incorrecta"}, status=status.HTTP_401_UNAUTHORIZED)
         except Usuario.DoesNotExist:
             return Response({"error": "Usuario no encontrado"}, status=status.HTTP_404_NOT_FOUND)
@@ -62,11 +100,21 @@ class CrearUsuarioView(APIView):
             return Response({"error": "Nombre, email y contraseña son obligatorios"}, status=status.HTTP_400_BAD_REQUEST)
         if Usuario.objects.filter(email=email).exists():
             return Response({"error": "El email ya está registrado"}, status=status.HTTP_400_BAD_REQUEST)
-        usuario = Usuario.objects.create(nombre=nombre, email=email, password_hash=make_password(password), activo=True)
+        
+        usuario_nuevo = Usuario.objects.create(nombre=nombre, email=email, password_hash=make_password(password), activo=True)
         if rol_id:
-            UsuarioRol.objects.create(usuario_id=usuario.id, rol_id=rol_id)
-        Bitacora.objects.create(usuario=usuario, accion='CREAR_USUARIO', tabla='usuarios', ip=request.META.get('REMOTE_ADDR'))
-        return Response({"mensaje": "Usuario creado correctamente"}, status=status.HTTP_201_CREATED)
+            UsuarioRol.objects.create(usuario_id=usuario_nuevo.id, rol_id=rol_id)
+        
+        # ✅ Obtener quién está ejecutando la acción (del token si existe)
+        usuario_actual = get_usuario_from_token(request)
+        crear_bitacora(
+            usuario=usuario_actual,  # Quién ejecutó la acción
+            accion='CREATE_USUARIO',
+            modulo_afectado='Gestión de Usuarios',
+            descripcion=f'Nuevo usuario creado: {email}',
+            request=request
+        )
+        return Response({"mensaje": "Usuario creado correctamente", "id": usuario_nuevo.id}, status=status.HTTP_201_CREATED)
 
 
 class EditarUsuarioView(APIView):
@@ -84,7 +132,16 @@ class EditarUsuarioView(APIView):
             if rol_id:
                 UsuarioRol.objects.filter(usuario=usuario).delete()
                 UsuarioRol.objects.create(usuario=usuario, rol_id=rol_id)
-            Bitacora.objects.create(usuario=usuario, accion='EDITAR_USUARIO', tabla='usuarios', ip=request.META.get('REMOTE_ADDR'))
+            
+            # ✅ Obtener quién está ejecutando la acción
+            usuario_actual = get_usuario_from_token(request)
+            crear_bitacora(
+                usuario=usuario_actual,  # Quién ejecutó la acción
+                accion='UPDATE_USUARIO',
+                modulo_afectado='Gestión de Usuarios',
+                descripcion=f'Usuario actualizado: {usuario.email}',
+                request=request
+            )
             return Response({"mensaje": "Usuario actualizado correctamente"}, status=status.HTTP_200_OK)
         except Usuario.DoesNotExist:
             return Response({"error": "Usuario no encontrado"}, status=status.HTTP_404_NOT_FOUND)
@@ -95,7 +152,19 @@ class EliminarUsuarioView(APIView):
     def delete(self, request, id):
         try:
             usuario = Usuario.objects.get(id=id)
+            email_usuario = usuario.email
             usuario.delete()
+            
+            # ✅ Obtener quién está ejecutando la acción
+            usuario_actual = get_usuario_from_token(request)
+            crear_bitacora(
+                usuario=usuario_actual,  # Quién ejecutó la acción
+                accion='DELETE_USUARIO',
+                modulo_afectado='Gestión de Usuarios',
+                descripcion=f'Usuario eliminado: {email_usuario}',
+                request=request,
+                nivel_riesgo='ALERTA'
+            )
             return Response({"mensaje": "Usuario eliminado correctamente"}, status=status.HTTP_200_OK)
         except Usuario.DoesNotExist:
             return Response({"error": "Usuario no encontrado"}, status=status.HTTP_404_NOT_FOUND)
@@ -118,12 +187,16 @@ class CrearRolView(APIView):
         if Rol.objects.filter(nombre=nombre).exists():
             return Response({"error": "El rol ya existe"}, status=status.HTTP_400_BAD_REQUEST)
         rol = Rol.objects.create(nombre=nombre, descripcion=descripcion)
-        try:
-            usuario = get_usuario_from_token(request)
-            if usuario:
-                Bitacora.objects.create(usuario=usuario, accion='CREAR_ROL', tabla='roles', ip=request.META.get('REMOTE_ADDR'))
-        except:
-            pass
+        
+        # ✅ SIEMPRE registra
+        usuario = get_usuario_from_token(request)
+        crear_bitacora(
+            usuario=usuario,
+            accion='CREATE_ROL',
+            modulo_afectado='Gestión de Roles',
+            descripcion=f'Nuevo rol creado: {nombre}',
+            request=request
+        )
         return Response({"mensaje": "Rol creado correctamente", "id": rol.id}, status=status.HTTP_201_CREATED)
 
 
@@ -135,12 +208,16 @@ class EditarRolView(APIView):
             rol.nombre = request.data.get('nombre', rol.nombre)
             rol.descripcion = request.data.get('descripcion', rol.descripcion)
             rol.save()
-            try:
-                usuario = get_usuario_from_token(request)
-                if usuario:
-                    Bitacora.objects.create(usuario=usuario, accion='EDITAR_ROL', tabla='roles', ip=request.META.get('REMOTE_ADDR'))
-            except:
-                pass
+            
+            # ✅ SIEMPRE registra
+            usuario = get_usuario_from_token(request)
+            crear_bitacora(
+                usuario=usuario,
+                accion='UPDATE_ROL',
+                modulo_afectado='Gestión de Roles',
+                descripcion=f'Rol actualizado: {rol.nombre}',
+                request=request
+            )
             return Response({"mensaje": "Rol actualizado correctamente"}, status=status.HTTP_200_OK)
         except Rol.DoesNotExist:
             return Response({"error": "Rol no encontrado"}, status=status.HTTP_404_NOT_FOUND)
@@ -151,13 +228,19 @@ class EliminarRolView(APIView):
     def delete(self, request, id):
         try:
             rol = Rol.objects.get(id=id)
+            nombre_rol = rol.nombre
             rol.delete()
-            try:
-                usuario = get_usuario_from_token(request)
-                if usuario:
-                    Bitacora.objects.create(usuario=usuario, accion='ELIMINAR _ROL', tabla='roles', ip=request.META.get('REMOTE_ADDR'))
-            except:
-                pass
+            
+            # ✅ SIEMPRE registra
+            usuario = get_usuario_from_token(request)
+            crear_bitacora(
+                usuario=usuario,
+                accion='DELETE_ROL',
+                modulo_afectado='Gestión de Roles',
+                descripcion=f'Rol eliminado: {nombre_rol}',
+                request=request,
+                nivel_riesgo='ALERTA'
+            )
             return Response({"mensaje": "Rol eliminado correctamente"}, status=status.HTTP_200_OK)
         except Rol.DoesNotExist:
             return Response({"error": "Rol no encontrado"}, status=status.HTTP_404_NOT_FOUND)
@@ -179,9 +262,16 @@ class CrearPermisoView(APIView):
         if Permiso.objects.filter(codigo=codigo).exists():
             return Response({"error": "El permiso ya existe"}, status=status.HTTP_400_BAD_REQUEST)
         permiso = Permiso.objects.create(codigo=codigo, modulo=modulo)
+        
+        # ✅ SIEMPRE registra, incluso si usuario es None
         usuario = get_usuario_from_token(request)
-        if usuario:
-            Bitacora.objects.create(usuario=usuario, accion='CREAR_PERMISO', tabla='permisos', ip=request.META.get('REMOTE_ADDR'))
+        crear_bitacora(
+            usuario=usuario,
+            accion='CREATE_PERMISO',
+            modulo_afectado='Gestión de Permisos',
+            descripcion=f'Nuevo permiso creado: {codigo} ({modulo})',
+            request=request
+        )
         return Response({"mensaje": "Permiso creado correctamente", "id": permiso.id}, status=status.HTTP_201_CREATED)
 
 
@@ -193,9 +283,16 @@ class EditarPermisoView(APIView):
             permiso.codigo = request.data.get('codigo', permiso.codigo)
             permiso.modulo = request.data.get('modulo', permiso.modulo)
             permiso.save()
+            
+            # ✅ SIEMPRE registra
             usuario = get_usuario_from_token(request)
-            if usuario:
-                Bitacora.objects.create(usuario=usuario, accion='EDITAR_PERMISO', tabla='permisos', ip=request.META.get('REMOTE_ADDR'))
+            crear_bitacora(
+                usuario=usuario,
+                accion='UPDATE_PERMISO',
+                modulo_afectado='Gestión de Permisos',
+                descripcion=f'Permiso actualizado: {permiso.codigo} ({permiso.modulo})',
+                request=request
+            )
             return Response({"mensaje": "Permiso actualizado correctamente"}, status=status.HTTP_200_OK)
         except Permiso.DoesNotExist:
             return Response({"error": "Permiso no encontrado"}, status=status.HTTP_404_NOT_FOUND)
@@ -206,10 +303,19 @@ class EliminarPermisoView(APIView):
     def delete(self, request, id):
         try:
             permiso = Permiso.objects.get(id=id)
+            codigo_permiso = permiso.codigo
             permiso.delete()
+            
+            # ✅ SIEMPRE registra
             usuario = get_usuario_from_token(request)
-            if usuario:
-                Bitacora.objects.create(usuario=usuario, accion='ELIMINAR_PERMISO', tabla='permisos', ip=request.META.get('REMOTE_ADDR'))
+            crear_bitacora(
+                usuario=usuario,
+                accion='DELETE_PERMISO',
+                modulo_afectado='Gestión de Permisos',
+                descripcion=f'Permiso eliminado: {codigo_permiso}',
+                request=request,
+                nivel_riesgo='ALERTA'
+            )
             return Response({"mensaje": "Permiso eliminado correctamente"}, status=status.HTTP_200_OK)
         except Permiso.DoesNotExist:
             return Response({"error": "Permiso no encontrado"}, status=status.HTTP_404_NOT_FOUND)
@@ -218,7 +324,7 @@ class EliminarPermisoView(APIView):
 class ListarBitacoraView(APIView):
     permission_classes = [AllowAny]
     def get(self, request):
-        registros = Bitacora.objects.select_related('usuario').order_by('-fecha').values(
-            'id', 'usuario__nombre', 'accion', 'tabla', 'ip', 'fecha'
+        registros = Bitacora.objects.select_related('usuario').order_by('-creado_en').values(
+            'id', 'usuario__nombre', 'accion', 'modulo_afectado', 'descripcion', 'direccion_ip', 'nivel_riesgo', 'creado_en'
         )
         return Response(list(registros), status=status.HTTP_200_OK)

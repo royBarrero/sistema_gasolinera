@@ -17,7 +17,7 @@ class Permiso(models.Model):
     def __str__(self):
         return f"{self.modulo} - {self.codigo}"
 class Usuario(models.Model): 
-    nombre=models.CharField( max_length=100)
+    nombre=models.CharField(max_length=100)
     email=models.EmailField(unique=True)
     password_hash=models.CharField(max_length=255)
     activo=models.BooleanField(default=True)
@@ -26,13 +26,17 @@ class Usuario(models.Model):
         db_table='usuarios'
     def __str__(self):
         return f"{self.nombre} ({self.email})"
-# Definimos los niveles de alerta para el sistema
-    NIVELES_RIESGO = [
-        ('INFO', 'Información Normal'),
-        ('ALERTA', 'Acceso No Autorizado / Intento Fallido'),
-        ('CRITICO', 'Peligro / Acción Destructiva'),
-    ]
 
+
+# Definimos los niveles de alerta para el sistema
+NIVELES_RIESGO = [
+    ('INFO', 'Información Normal'),
+    ('ALERTA', 'Acceso No Autorizado / Intento Fallido'),
+    ('CRITICO', 'Peligro / Acción Destructiva'),
+]
+
+
+class Bitacora(models.Model):
     # null=True es VITAL aquí. Si alguien falla el login, no hay usuario, pero registramos el intento.
     usuario = models.ForeignKey(Usuario, on_delete=models.CASCADE, null=True, blank=True)
     
