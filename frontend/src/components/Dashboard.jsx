@@ -6,16 +6,22 @@ const Dashboard = () => {
     const navigate = useNavigate();
 
     const obtenerUsuario = () => {
-        const token = localStorage.getItem('token');
-        if (!token) return null;
-        const payload = JSON.parse(atob(token.split('.')[1]));
-        return payload;
+        // Usar el usuario guardado después del login
+        const usuarioJSON = localStorage.getItem('usuario');
+        if (!usuarioJSON) return null;
+        try {
+            return JSON.parse(usuarioJSON);
+        } catch (e) {
+            return null;
+        }
     };
 
     const usuario = obtenerUsuario();
 
     const handleLogout = () => {
-        localStorage.removeItem('token');
+        localStorage.removeItem('access_token');
+        localStorage.removeItem('refresh_token');
+        localStorage.removeItem('usuario');
         navigate('/login');
     };
 

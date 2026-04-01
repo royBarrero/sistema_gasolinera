@@ -1,11 +1,13 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import axios from 'axios';
 import api from '../api/axios';
-import { Mail, Lock, Fuel } from 'lucide-react';
+import { Mail, Lock, Fuel, AlertCircle } from 'lucide-react';
 
 const Login = () => {
-    const [email, setEmail] = useState('');
-    const [password, setPassword] = useState('');
+    // Pre-rellenar con credenciales de desarrollo
+    const [email, setEmail] = useState('test@ejemplo.com');
+    const [password, setPassword] = useState('test123');
     const [error, setError] = useState('');
     const [loading, setLoading] = useState(false);
     const navigate = useNavigate();
@@ -14,15 +16,54 @@ const Login = () => {
         e.preventDefault();
         setLoading(true);
         setError('');
+        
+        console.log('📤 Enviando login...', { email, password: '***' });
+        
+        // ✅ Limpiar tokens viejos/inválidos antes de intentar login
+        localStorage.removeItem('access_token');
+        localStorage.removeItem('refresh_token');
+        localStorage.removeItem('usuario');
+        console.log('🧹 localStorage limpiado');
+        
         try {
-            const response = await api.post('login/', { email, password });
-            localStorage.setItem('token', response.data.access);
-            navigate('/dashboard');
+            // ✅ Crear instancia nueva de axios SIN interceptor para login
+            const loginResponse = await axios.post(
+                'http://127.0.0.1:8000/api/login/', 
+                { email, password },
+                { headers: { 'Content-Type': 'application/json' } }
+            );
+            
+            console.log('✅ Login exitoso, respuesta:', loginResponse.data);
+            
+            // Guardar tokens
+            localStorage.setItem('access_token', loginResponse.data.access);
+            localStorage.setItem('refresh_token', loginResponse.data.refresh);
+            localStorage.setItem('usuario', JSON.stringify(loginResponse.data.usuario));
+            
+            console.log('💾 Tokens guardados en localStorage');
+            console.log('👤 Usuario:', loginResponse.data.usuario.nombre);
+            
+            // ✅ Pequeña pausa para asegurar que localStorage se sincronice
+            setTimeout(() => {
+                navigate('/dashboard');
+            }, 100);
+            
         } catch (err) {
-            setError("Credenciales incorrectas o servidor caído");
+            console.error('❌ Error en login:', err);
+            console.error('Status:', err.response?.status);
+            console.error('Data:', err.response?.data);
+            const errorMessage = err.response?.data?.detail || err.response?.data?.error || "Credenciales incorrectas o servidor caído";
+            setError(errorMessage);
+            console.log('⚠️ Error mostrado:', errorMessage);
         } finally {
             setLoading(false);
         }
+    };
+
+    const useDevelopmentCredentials = () => {
+        setEmail('test@ejemplo.com');
+        setPassword('test123');
+        setError('');
     };
 
     return (
@@ -37,6 +78,15 @@ const Login = () => {
 
                 <h2 className="text-center text-xl font-semibold text-slate-900 mb-1">Sistema Gasolinera</h2>
                 <p className="text-center text-sm text-gray-400 mb-6">Ingresa tus credenciales para continuar</p>
+
+                {/* Aviso de modo desarrollo */}
+                <div className="bg-blue-50 border border-blue-200 text-blue-700 rounded-lg px-4 py-3 text-xs mb-4 flex gap-2">
+                    <AlertCircle size={16} className="flex-shrink-0 mt-0.5" />
+                    <div>
+                        <p className="font-semibold">Modo Desarrollo</p>
+                        <p>Credenciales pre-cargadas: test@ejemplo.com / test123</p>
+                    </div>
+                </div>
 
                 {error && (
                     <div className="bg-red-50 border border-red-200 text-red-600 rounded-lg px-4 py-2 text-sm mb-4">
@@ -61,6 +111,14 @@ const Login = () => {
                         {loading ? 'Ingresando...' : 'Ingresar'}
                     </button>
                 </form>
+
+                <button
+                    type="button"
+                    onClick={useDevelopmentCredentials}
+                    className="w-full mt-3 bg-slate-200 text-slate-700 font-semibold py-2 rounded-lg text-xs hover:bg-slate-300 transition-colors"
+                >
+                    ↻ Usar Credenciales de Desarrollo
+                </button>
 
                 <p className="text-center text-xs text-gray-300 mt-6">Estación de Servicio · v1.0</p>
             </div>
